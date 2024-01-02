@@ -1,3 +1,4 @@
+use preftree::PrefixTree;
 use std::rc::Rc;
 
 pub struct Context {
@@ -6,7 +7,7 @@ pub struct Context {
 }
 
 pub struct Executor {
-    pub names: preftree::PrefixTree<char, Rc<dyn Fn(Context, &mut Executor) -> Context>>,
+    pub names: PrefixTree<char, Rc<dyn Fn(Context, &mut Executor) -> Context>>,
 }
 
 impl Executor {
@@ -15,16 +16,26 @@ impl Executor {
             before: "".into(),
             after: program,
         };
+        let mut after = &context.after[..];
         loop {
-            let mut after_chars = context.after.chars();
-            match self.names.get_exact_match_mut(&mut after_chars) {
+            let mut after_chars = after.chars();
+            match self.names.get_by_shortest_prefix(&mut after_chars) {
                 Some(function) => {
                     let function = function.clone();
-                    context.after = after_chars.as_str().to_owned();
+                    let new_after = after_chars.as_str().to_owned();
+                    context.after = new_after;
                     context = function(context, self);
+                    after = &context.after[..];
                 }
                 None => {
-                    return context.before + &context.after;
+                    let mut after_chars = after.chars();
+                    match after_chars.next() {
+                        None => return context.before + after,
+                        Some(next_char) => {
+                            context.before.push(next_char);
+                            after = after_chars.as_str()
+                        }
+                    }
                 }
             }
         }
@@ -33,8 +44,28 @@ impl Executor {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn test_executor() {
+        let mut executor = Executor {
+            names: PrefixTree::new(),
+        };
+        executor.names.insert(
+            "nothing".chars(),
+            Rc::new(|context: Context, _executor: &mut Executor| context) as _,
+        );
 
+        assert_eq!(executor.execute("abcnothingdef".into()), "abcdef");
+
+        executor.names.insert(
+            "reverse".chars(),
+            Rc::new(|context: Context, _executor: &mut Executor| Context {
+                before: context.after,
+                after: context.before,
+            }) as _,
+        );
+
+        assert_eq!(executor.execute("abcreversedef".into()), "defabc");
     }
 }
